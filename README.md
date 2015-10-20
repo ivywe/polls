@@ -1,2 +1,2 @@
 # polls
-Geeklog polls plugin
+Geeklog polls plugin 2.1.5
