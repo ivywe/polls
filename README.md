@@ -1,0 +1,2 @@
+# polls
+Geeklog polls plugin
