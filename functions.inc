@@ -40,6 +40,20 @@
 * @package Polls
 */
 
+//hack1 2015/10/13
+//allow multipleanswers
+//If set to 1, users will be allowed multipleanswers (checkbox)
+//
+// ALTER TABLE `gl_pollquestions` ADD `allow_multipleanswers` TINYINT( 1 ) NULL DEFAULT NULL
+//
+//----------------
+//hack2 2015/10/14
+//description
+//
+// ALTER TABLE `gl_polltopics` ADD `description` MEDIUMTEXT NULL
+// ALTER TABLE `gl_pollquestions` ADD `description` MEDIUMTEXT NULL
+
+
 if (strpos(strtolower($_SERVER['PHP_SELF']), 'functions.inc') !== false) {
     die('This file can not be used on its own.');
 }
@@ -442,7 +456,7 @@ function POLLS_pollVote($pid, $showall = true, $displaytype = 0, $order = '', $m
     $retval = '';
 
     $result = DB_query("SELECT topic,voters,commentcode,is_open,hideresults,owner_id "
-        . ",group_id,perm_owner,perm_group,perm_anon,perm_members "
+        . ",group_id,perm_owner,perm_group,perm_anon,perm_members ,description "
         . "FROM {$_TABLES['polltopics']} WHERE pid='$pid'" . COM_getPermSql('AND'));
     $ntopics = DB_numRows($result);
 
@@ -454,7 +468,7 @@ function POLLS_pollVote($pid, $showall = true, $displaytype = 0, $order = '', $m
 
     if ((!isset($_COOKIE[$pid]) && !POLLS_ipAlreadyVoted($pid)) or ($P['is_open'] == 1)) {
         if ($ntopics == 1) {
-            $questions_sql = "SELECT question,qid "
+            $questions_sql = "SELECT question,qid ,allow_multipleanswers ,description "
                 . "FROM {$_TABLES['pollquestions']} "
                 . "WHERE pid='$pid' ORDER BY qid";
 
@@ -469,6 +483,7 @@ function POLLS_pollVote($pid, $showall = true, $displaytype = 0, $order = '', $m
                                       'comments'   => 'pollcomments.thtml'));
                 $poll->set_var('poll_id', $pid );
                 $poll->set_var('poll_topic', $P['topic'] );
+                $poll->set_var('poll_topic_description', $P['description'] );
                 $poll->set_var('num_votes', COM_numberFormat($P['voters']));
                 $poll->set_var('poll_vote_url', $_CONF['site_url']
                                                 . '/polls/index.php');
@@ -517,7 +532,16 @@ function POLLS_pollVote($pid, $showall = true, $displaytype = 0, $order = '', $m
                 for ($j = 0; $j < $nquestions; $j++) {
                     $Q = DB_fetchArray($questions);
                     $poll->set_var('poll_question', $Q['question']);
+                    $poll->set_var('poll_description', $Q['description']);
                     $poll->set_var('question_id', $j);
+
+                    if ($Q['allow_multipleanswers'] == 1) {
+						$poll->set_var('input_type', 'checkbox');
+						$checked=' checked';
+					}else{
+                        $poll->set_var('input_type', 'radio');
+						$checked=' checked="checked"' ;
+                    }
 
                     $notification = '';
                     $filter = '';
@@ -541,7 +565,7 @@ function POLLS_pollVote($pid, $showall = true, $displaytype = 0, $order = '', $m
                     for($i=0; $i<$nanswers; $i++) {
                         $A = DB_fetchArray($answers );
                         if (($j < count($aid)) && ($aid[$j] == $A['aid'])) {
-                            $poll->set_var('selected', ' checked');
+                            $poll->set_var('selected', $checked);
                         }
                         $poll->set_var('answer_id', $A['aid']);
                         $poll->set_var('answer_text', $A['answer']);
@@ -690,17 +714,19 @@ function POLLS_pollsave($pid, $aid)
 
     DB_change($_TABLES['polltopics'],'voters',"voters + 1",'pid',$pid,'',true);
     // This call to DB-change will properly supress the insertion of quotes around $value in the sql
-    $answers = count($aid);
-    for ($i = 0; $i < $answers; $i++) {
-        DB_change(
+	foreach( $aid as $qid => $avalueary ){
+		foreach( $avalueary as $j => $avalue ){
+			$avalue=COM_applyFilter($avalue, true);
+            DB_change(
             $_TABLES['pollanswers'],
             'votes',
             "votes + 1",
             array('pid', 'qid', 'aid'),
-            array($pid,  $i,    COM_applyFilter($aid[$i], true)),
+            array($pid,  $qid,    $avalue),
             '',
             true
-        );
+            );
+        }
     }
 
     // This always does an insert so no need to provide key_field and key_value args
@@ -730,7 +756,7 @@ function POLLS_pollsave($pid, $aid)
 * @return     string   HTML Formated Poll Results
 *
 */
-function POLLS_pollResults($pid, $scale=100, $order='', $mode='', $page = 1, $displaytype = 0)
+function POLLS_pollResults($pid, $scale=400, $order='', $mode='', $page = 1, $displaytype = 0)
 {
     global $_CONF, $_TABLES, $_USER, $_IMAGE_TYPE,
            $_PO_CONF, $LANG01, $LANG_POLLS, $_COM_VERBOSE, $LANG25;
@@ -738,7 +764,7 @@ function POLLS_pollResults($pid, $scale=100, $order='', $mode='', $page = 1, $di
     $retval = '';
 
     $topic_sql = "SELECT topic,voters,is_open,hideresults,commentcode,owner_id,group_id,"
-        . "perm_owner,perm_group,perm_members,perm_anon "
+        . "perm_owner,perm_group,perm_members,perm_anon,description "
         . "FROM {$_TABLES['polltopics']} WHERE pid='$pid'";
     $result = DB_query($topic_sql);
     $P = DB_fetchArray($result);
@@ -768,7 +794,7 @@ function POLLS_pollResults($pid, $scale=100, $order='', $mode='', $page = 1, $di
 
     $ntopic = DB_numRows($result);
     if ($ntopic == 1) {
-        $questions_sql = "SELECT qid,pid,question "
+        $questions_sql = "SELECT qid,pid,question,description "
             . "FROM {$_TABLES['pollquestions']} "
             . "WHERE pid='$pid' "
             . "ORDER BY qid";
@@ -787,6 +813,7 @@ function POLLS_pollResults($pid, $scale=100, $order='', $mode='', $page = 1, $di
                 'votes_bar' => 'pollvotes_bar.thtml',
                 'votes_num' => 'pollvotes_num.thtml' ));
             $poll->set_var('poll_topic', $P['topic']);
+            $poll->set_var('poll_topic_description', $P['description']);
             $poll->set_var('poll_id', $pid);
             $poll->set_var('num_votes', COM_numberFormat($P['voters']));
             $poll->set_var('lang_voters', $LANG_POLLS['voters']);
@@ -811,12 +838,16 @@ function POLLS_pollResults($pid, $scale=100, $order='', $mode='', $page = 1, $di
             }
 
             for ($j = 0; $j < $nquestions; $j++) {
+
+                $poll->set_var('question_id', $j);
+
                 $Q = DB_fetchArray($questions);
 
                 if ($nquestions >= 1) {
                     $counter = ($j + 1) . "/$nquestions: " ;
                 }
                 $poll->set_var('poll_question', $counter . $Q['question']);
+                $poll->set_var('poll_description', $counter . $Q['description']);
 
                 $answer_sql = "SELECT votes,answer,remark "
                     . "FROM {$_TABLES['pollanswers']} "
@@ -850,7 +881,7 @@ function POLLS_pollResults($pid, $scale=100, $order='', $mode='', $page = 1, $di
                     $poll->set_var('answer_num', COM_numberFormat($A['votes']));
                     $poll->set_var('answer_percent',
                                     sprintf('%.2f', $percent * 100));
-                    if ($scale < 50) {
+                    if ($scale < 120) {
                         $poll->parse('poll_votes', 'votes_num', true );
                     } else {
                         $width = (int)($percent * $scale);
@@ -885,7 +916,7 @@ function POLLS_pollResults($pid, $scale=100, $order='', $mode='', $page = 1, $di
 
             $retval .= $poll->finish($poll->parse('output', 'result' ));
 
-            if($scale > 99 && $P['commentcode'] >= 0 && $displaytype != 2) {
+            if($scale > 399 && $P['commentcode'] >= 0 && $displaytype != 2) {
                 $delete_option = (SEC_hasRights('polls.edit') &&
                     SEC_hasAccess($P['owner_id'], $P['group_id'],
                     $P['perm_owner'], $P['perm_group'], $P['perm_members'],
@@ -936,7 +967,7 @@ function POLLS_ipAlreadyVoted($pid, $ip = '' )
 */
 function phpblock_polls()
 {
-    return POLLS_showPoll(0, '', false, 1);
+    return POLLS_showPoll(60, '', false, 1);
 }
 
 
@@ -1118,6 +1149,9 @@ function plugin_upgrade_polls()
         return 3002;
     }
 
+    $inst_parms = plugin_autoinstall_polls('polls');
+    $pi_gl_version = $inst_parms['info']['pi_gl_version'];
+
     require_once $_CONF['path'] . 'plugins/polls/sql/'
                                 . $_DB_dbms . '_updates.php';
 
@@ -1250,7 +1284,14 @@ function plugin_upgrade_polls()
             break;
 
         case '2.1.5':
-            $current_version = '2.1.6';
+            if (isset($_UPDATES[$current_version])) {
+                $_SQL = $_UPDATES[$current_version];
+                foreach ($_SQL as $sql) {
+                    DB_query($sql);
+                }
+            }
+
+            $current_version = '2.1.6.1';
             break;
 
         default:
